@@ -34,13 +34,17 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK
+      - name: Install Android SDK from preinstalled command-line tools
         shell: bash
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager 'platforms;android-37' 'build-tools;37.0.0' 'platform-tools'
+          echo "ANDROID_HOME=${ANDROID_HOME:-unset}"
+          SDKMANAGER="$(command -v sdkmanager || true)"
+          if [ -z "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools" -path '*/bin/sdkmanager' -type f | head -n 1)"
+          fi
+          test -n "$SDKMANAGER" && test -f "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" 'platforms;android-37' 'build-tools;37.0.0' 'platform-tools'
 
       - uses: gradle/actions/setup-gradle@v4
 
