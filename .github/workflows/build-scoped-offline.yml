@@ -44,19 +44,33 @@ jobs:
           fi
           test -n "$SDKMANAGER" && test -f "$SDKMANAGER"
           yes | "$SDKMANAGER" --licenses > /dev/null || true
-          "$SDKMANAGER" 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools'
+          "$SDKMANAGER" --channel=3 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'
+          test -f "${ANDROID_HOME}/platforms/android-37.0/android.jar"
 
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Apply scoped offline-first changes
         run: python3 tools/offline_patch.py --root .
 
-      - name: Compile against available Android SDK 36 (upstream uses 37)
+      - name: Use explicit Android API 37.0 for Gradle
         shell: bash
         run: |
-          for file in app/build.gradle.kts app-ui/build.gradle.kts service/build.gradle.kts core-data/build.gradle.kts xposed/build.gradle.kts; do
-            sed -i 's/compileSdk = 37/compileSdk = 36/g; s/targetSdk = 37/targetSdk = 36/g' "$file"
-          done
+          python3 - <<'PY'
+          from pathlib import Path
+          files = [
+            "app/build.gradle.kts",
+            "app-ui/build.gradle.kts",
+            "service/build.gradle.kts",
+            "core-data/build.gradle.kts",
+            "xposed/build.gradle.kts",
+          ]
+          for file in files:
+              path = Path(file)
+              src = path.read_text()
+              assert src.count("compileSdk = 37") == 1, f"Unexpected compileSdk in {file}"
+              src = src.replace("compileSdk = 37", "compileSdk { version = release(37) { minorApiLevel = 0 } }")
+              path.write_text(src)
+          PY
 
       - name: Build scoped debug APK
         run: |
