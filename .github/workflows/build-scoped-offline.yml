@@ -1,0 +1,60 @@
+name: Build scoped offline-first APK
+
+on:
+  push:
+    branches:
+      - offline/scoped-first
+    paths:
+      - 'tools/offline_patch.py'
+      - '.github/workflows/build-scoped-offline.yml'
+      - 'app/**'
+      - 'app-ui/**'
+      - 'service/**'
+      - 'xposed/**'
+      - 'core-data/**'
+      - 'core-geo/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - name: Checkout public fork source
+        uses: actions/checkout@v4
+
+      - name: Check offline patch syntax
+        run: python3 -m py_compile tools/offline_patch.py
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager 'platforms;android-37' 'build-tools;37.0.0' 'platform-tools'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Apply scoped offline-first changes
+        run: python3 tools/offline_patch.py --root .
+
+      - name: Build scoped debug APK
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon :app:assembleScopedDebug --stacktrace
+
+      - name: Upload scoped debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocationSpoofer-scoped-offline-first-debug
+          path: app/build/outputs/apk/scoped/debug/*.apk
+          if-no-files-found: error
