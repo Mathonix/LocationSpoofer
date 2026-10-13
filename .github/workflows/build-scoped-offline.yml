@@ -1,0 +1,85 @@
+name: Build scoped offline-first APK
+
+on:
+  push:
+    branches:
+      - offline/scoped-first
+    paths:
+      - 'tools/offline_patch.py'
+      - '.github/workflows/build-scoped-offline.yml'
+      - 'app/**'
+      - 'app-ui/**'
+      - 'service/**'
+      - 'xposed/**'
+      - 'core-data/**'
+      - 'core-geo/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - name: Checkout public fork source
+        uses: actions/checkout@v4
+
+      - name: Check offline patch syntax
+        run: python3 -m py_compile tools/offline_patch.py
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK from preinstalled command-line tools
+        shell: bash
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME:-unset}"
+          SDKMANAGER="$(command -v sdkmanager || true)"
+          if [ -z "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools" -path '*/bin/sdkmanager' -type f | head -n 1)"
+          fi
+          test -n "$SDKMANAGER" && test -f "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" --channel=3 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'
+          test -f "${ANDROID_HOME}/platforms/android-37.0/android.jar"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Apply scoped offline-first changes
+        run: python3 tools/offline_patch.py --root .
+
+      - name: Use explicit Android API 37.0 for Gradle
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          files = [
+            "app/build.gradle.kts",
+            "app-ui/build.gradle.kts",
+            "service/build.gradle.kts",
+            "core-data/build.gradle.kts",
+            "xposed/build.gradle.kts",
+          ]
+          for file in files:
+              path = Path(file)
+              src = path.read_text()
+              assert src.count("compileSdk = 37") == 1, f"Unexpected compileSdk in {file}"
+              src = src.replace("compileSdk = 37", "compileSdk { version = release(37) { minorApiLevel = 0 } }")
+              path.write_text(src)
+          PY
+
+      - name: Build scoped debug APK
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon :app:assembleScopedDebug --stacktrace
+
+      - name: Upload scoped debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocationSpoofer-scoped-offline-first-debug
+          path: app/build/outputs/apk/scoped/debug/*.apk
+          if-no-files-found: error
